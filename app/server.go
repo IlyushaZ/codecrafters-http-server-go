@@ -48,6 +48,25 @@ func handleRequest(conn net.Conn) error {
 		return respond(conn, 200, "OK", nil)
 	}
 
+	if split[1] == "/user-agent" {
+		for {
+			header, err := bb.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("can't read header: %w", err)
+			}
+
+			split := strings.SplitN(header, ":", 2)
+			if len(split) != 2 {
+				return errors.New("no user-agent given")
+			}
+
+			if strings.ToLower(split[0]) == "user-agent" {
+				headerVal := strings.TrimSpace(split[1])
+				return respond(conn, 200, "OK", []byte(headerVal))
+			}
+		}
+	}
+
 	splitPath := strings.SplitN(split[1], "/", 3)
 	if len(splitPath) == 3 && splitPath[1] == "echo" {
 		fmt.Println(splitPath[2])
