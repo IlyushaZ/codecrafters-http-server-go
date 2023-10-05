@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -50,20 +51,22 @@ func handleRequest(conn net.Conn) error {
 		return errors.New("malformed start line")
 	}
 
+	reqMethod, reqPath := split[0], split[1]
+
 	switch {
-	case split[1] == "/":
+	case reqPath == "/":
 		return respond(conn, 200, "OK", "text/plain", nil)
 
-	case split[1] == "/user-agent":
+	case reqPath == "/user-agent":
 		for {
 			header, err := bb.ReadString('\n')
 			if err != nil {
-				return fmt.Errorf("can't read header: %w", err)
+				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't read header: %v", err)))
 			}
 
 			split := strings.SplitN(header, ":", 2)
 			if len(split) != 2 {
-				return errors.New("no user-agent given")
+				return respond(conn, 400, "Bad Request", "text/plain", []byte("no user-agent in request"))
 			}
 
 			if strings.ToLower(split[0]) == "user-agent" {
@@ -72,25 +75,73 @@ func handleRequest(conn net.Conn) error {
 			}
 		}
 
-	case strings.HasPrefix(split[1], "/files/"):
-		p := path.Join(filesDir, strings.TrimPrefix(split[1], "/files/"))
-		f, err := os.Open(p)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return respond(conn, 404, "Not Found", "application/octet-stream", nil)
+	case strings.HasPrefix(reqPath, "/files/"):
+		p := path.Join(filesDir, strings.TrimPrefix(reqPath, "/files/"))
+
+		switch reqMethod {
+		case "GET":
+			f, err := os.Open(p)
+			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return respond(conn, 404, "Not Found", "application/octet-stream", nil)
+				}
+				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't can't open file: %v", err)))
 			}
-			return fmt.Errorf("can't open file: %w", err)
+			defer f.Close()
+
+			content, err := io.ReadAll(f)
+			if err != nil {
+				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't can't read file: %v", err)))
+			}
+
+			return respond(conn, 200, "OK", "application/octet-stream", content)
+
+		case "POST":
+			f, err := os.Create(p)
+			if err != nil {
+				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't create file: %v", err)))
+			}
+			defer f.Close()
+
+			var contentLen int
+			// skip all headers
+			for {
+				header, err := bb.ReadString('\n')
+				if err != nil {
+					return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't read header: %v", err)))
+				}
+
+				// headers section is over
+				if strings.TrimSpace(header) == "" {
+					break
+				}
+
+				split := strings.SplitN(header, ":", 2)
+				if len(split) != 2 {
+					return respond(conn, 400, "Bad Request", "text/plain", []byte("no user-agent in request"))
+				}
+
+				if strings.ToLower(split[0]) == "content-length" {
+					headerVal := strings.TrimSpace(split[1])
+					contentLen, _ = strconv.Atoi(headerVal)
+				}
+			}
+
+			buf := make([]byte, contentLen)
+			if _, err := bb.Read(buf); err != nil {
+				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can' read from req: %v", err)))
+			}
+
+			if _, err := f.Write(buf); err != nil {
+				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can' write to file: %v", err)))
+			}
+			return respond(conn, 201, "Created", "text/plain", nil)
+
+		default:
+			return respond(conn, 405, "Method Not Allowed", "text/plain", nil)
 		}
-
-		content, err := io.ReadAll(f)
-		if err != nil {
-			return fmt.Errorf("can't read from file: %w", err)
-		}
-
-		return respond(conn, 200, "OK", "application/octet-stream", content)
-
-	case strings.HasPrefix(split[1], "/echo/"):
-		return respond(conn, 200, "OK", "text/plain", []byte(strings.TrimPrefix(split[1], "/echo/")))
+	case strings.HasPrefix(reqPath, "/echo/"):
+		return respond(conn, 200, "OK", "text/plain", []byte(strings.TrimPrefix(reqPath, "/echo/")))
 
 	default:
 		return respond(conn, 404, "Not Found", "text/plain", nil)
