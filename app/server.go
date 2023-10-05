@@ -9,15 +9,25 @@ import (
 	"strings"
 )
 
-func respond(conn net.Conn, status int, stringStatus string) error {
-	if _, err := fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\n\r\n", status, stringStatus); err != nil {
+func respond(conn net.Conn, status int, stringStatus string, body []byte) error {
+	_, err := fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\n", status, stringStatus)
+	if err != nil {
 		return fmt.Errorf("can't write to conn: %w", err)
+	}
+
+	if len(body) == 0 {
+		_, err = fmt.Fprint(conn, "\r\n")
+		return err
+	}
+
+	if _, err := fmt.Fprintf(conn, "Content-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+		return fmt.Errorf("can't write body to conn: %w", err)
 	}
 
 	return nil
 }
 
-func checkStartLine(conn net.Conn) error {
+func handleRequest(conn net.Conn) error {
 	buf := make([]byte, 1024)
 	if _, err := conn.Read(buf); err != nil {
 		return fmt.Errorf("can't read from conn: %w", err)
@@ -34,13 +44,17 @@ func checkStartLine(conn net.Conn) error {
 		return errors.New("malformed start line")
 	}
 
-	status, stringStatus := 200, "OK"
-
-	if split[1] != "/" {
-		status, stringStatus = 404, "Not Found"
+	if split[1] == "/" {
+		return respond(conn, 200, "OK", nil)
 	}
 
-	return respond(conn, status, stringStatus)
+	splitPath := strings.SplitN(split[1], "/", 3)
+	if len(splitPath) == 3 && splitPath[1] == "echo" {
+		fmt.Println(splitPath[2])
+		return respond(conn, 200, "OK", []byte(splitPath[2]))
+	}
+
+	return respond(conn, 404, "Not Found", nil)
 }
 
 func main() {
@@ -59,7 +73,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := checkStartLine(conn); err != nil {
+	if err := handleRequest(conn); err != nil {
 		fmt.Printf("can't check start line: %v", err)
 		os.Exit(1)
 	}
