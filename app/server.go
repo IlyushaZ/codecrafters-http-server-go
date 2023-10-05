@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"path"
 	"strings"
 )
 
-func respond(conn net.Conn, status int, stringStatus string, body []byte) error {
+var filesDir string
+
+func respond(conn net.Conn, status int, stringStatus string, contentType string, body []byte) error {
 	_, err := fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\n", status, stringStatus)
 	if err != nil {
 		return fmt.Errorf("can't write to conn: %w", err)
@@ -20,7 +24,7 @@ func respond(conn net.Conn, status int, stringStatus string, body []byte) error 
 		return err
 	}
 
-	if _, err := fmt.Fprintf(conn, "Content-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+	if _, err := fmt.Fprintf(conn, "Content-Type: %s\r\nContent-Length: %d\r\n\r\n%s", contentType, len(body), body); err != nil {
 		return fmt.Errorf("can't write body to conn: %w", err)
 	}
 
@@ -48,7 +52,7 @@ func handleRequest(conn net.Conn) error {
 
 	switch {
 	case split[1] == "/":
-		return respond(conn, 200, "OK", nil)
+		return respond(conn, 200, "OK", "text/plain", nil)
 
 	case split[1] == "/user-agent":
 		for {
@@ -64,21 +68,39 @@ func handleRequest(conn net.Conn) error {
 
 			if strings.ToLower(split[0]) == "user-agent" {
 				headerVal := strings.TrimSpace(split[1])
-				return respond(conn, 200, "OK", []byte(headerVal))
+				return respond(conn, 200, "OK", "text/plain", []byte(headerVal))
 			}
 		}
 
+	case strings.HasPrefix(split[1], "/files/"):
+		p := path.Join(filesDir, strings.TrimPrefix(split[1], "/files/"))
+		f, err := os.Open(p)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return respond(conn, 404, "Not Found", "application/octet-stream", nil)
+			}
+			return fmt.Errorf("can't open file: %w", err)
+		}
+
+		content, err := io.ReadAll(f)
+		if err != nil {
+			return fmt.Errorf("can't read from file: %w", err)
+		}
+
+		return respond(conn, 200, "OK", "application/octet-stream", content)
+
 	case strings.HasPrefix(split[1], "/echo/"):
-		return respond(conn, 200, "OK", []byte(strings.TrimPrefix(split[1], "/echo/")))
+		return respond(conn, 200, "OK", "text/plain", []byte(strings.TrimPrefix(split[1], "/echo/")))
 
 	default:
-		return respond(conn, 404, "Not Found", nil)
+		return respond(conn, 404, "Not Found", "text/plain", nil)
 	}
 }
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
+	if len(os.Args) >= 3 && os.Args[1] == "--directory" {
+		filesDir = os.Args[2]
+	}
 
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
