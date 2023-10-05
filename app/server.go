@@ -28,6 +28,8 @@ func respond(conn net.Conn, status int, stringStatus string, body []byte) error 
 }
 
 func handleRequest(conn net.Conn) error {
+	defer conn.Close()
+
 	buf := make([]byte, 1024)
 	if _, err := conn.Read(buf); err != nil {
 		return fmt.Errorf("can't read from conn: %w", err)
@@ -44,11 +46,11 @@ func handleRequest(conn net.Conn) error {
 		return errors.New("malformed start line")
 	}
 
-	if split[1] == "/" {
+	switch {
+	case split[1] == "/":
 		return respond(conn, 200, "OK", nil)
-	}
 
-	if split[1] == "/user-agent" {
+	case split[1] == "/user-agent":
 		for {
 			header, err := bb.ReadString('\n')
 			if err != nil {
@@ -65,15 +67,13 @@ func handleRequest(conn net.Conn) error {
 				return respond(conn, 200, "OK", []byte(headerVal))
 			}
 		}
-	}
 
-	splitPath := strings.SplitN(split[1], "/", 3)
-	if len(splitPath) == 3 && splitPath[1] == "echo" {
-		fmt.Println(splitPath[2])
-		return respond(conn, 200, "OK", []byte(splitPath[2]))
-	}
+	case strings.HasPrefix(split[1], "/echo/"):
+		return respond(conn, 200, "OK", []byte(strings.TrimPrefix(split[1], "/echo/")))
 
-	return respond(conn, 404, "Not Found", nil)
+	default:
+		return respond(conn, 404, "Not Found", nil)
+	}
 }
 
 func main() {
@@ -85,15 +85,19 @@ func main() {
 		fmt.Println("Failed to bind to port 4221")
 		os.Exit(1)
 	}
+	defer l.Close()
 
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
-	}
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			fmt.Println("Error accepting connection: ", err.Error())
+			os.Exit(1)
+		}
 
-	if err := handleRequest(conn); err != nil {
-		fmt.Printf("can't check start line: %v", err)
-		os.Exit(1)
+		go func() {
+			if err := handleRequest(conn); err != nil {
+				fmt.Printf("can't handle request: %v", err)
+			}
+		}()
 	}
 }
