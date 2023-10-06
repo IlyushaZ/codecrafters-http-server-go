@@ -12,6 +12,29 @@ import (
 	"strings"
 )
 
+const (
+	statusOK               = 200
+	statusCreated          = 201
+	statusInternal         = 500
+	statusNotFound         = 404
+	statusBadRequest       = 400
+	statusMethodNotAllowed = 405
+)
+
+const (
+	textStatusOK               = "OK"
+	textStatusCreated          = "Created"
+	textStatusInternal         = "Internal Server Error"
+	textStatusNotFound         = "Not Found"
+	textStatusBadRequest       = "Bad Request"
+	textStatusMethodNotAllowed = "Method Not Allowed"
+)
+
+const (
+	contentTypeTextPlain   = "text/plain"
+	contentTypeOctetStream = "application/octet-stream"
+)
+
 var filesDir string
 
 func respond(conn net.Conn, status int, stringStatus string, contentType string, body []byte) error {
@@ -55,23 +78,23 @@ func handleRequest(conn net.Conn) error {
 
 	switch {
 	case reqPath == "/":
-		return respond(conn, 200, "OK", "text/plain", nil)
+		return respond(conn, statusOK, textStatusOK, contentTypeTextPlain, nil)
 
 	case reqPath == "/user-agent":
 		for {
 			header, err := bb.ReadString('\n')
 			if err != nil {
-				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't read header: %v", err)))
+				return respond(conn, statusInternal, textStatusInternal, contentTypeTextPlain, []byte(fmt.Sprintf("can't read header: %v", err)))
 			}
 
 			split := strings.SplitN(header, ":", 2)
 			if len(split) != 2 {
-				return respond(conn, 400, "Bad Request", "text/plain", []byte("no user-agent in request"))
+				return respond(conn, statusBadRequest, textStatusBadRequest, contentTypeTextPlain, []byte("no user-agent in request"))
 			}
 
 			if strings.ToLower(split[0]) == "user-agent" {
 				headerVal := strings.TrimSpace(split[1])
-				return respond(conn, 200, "OK", "text/plain", []byte(headerVal))
+				return respond(conn, statusOK, textStatusOK, contentTypeTextPlain, []byte(headerVal))
 			}
 		}
 
@@ -83,23 +106,23 @@ func handleRequest(conn net.Conn) error {
 			f, err := os.Open(p)
 			if err != nil {
 				if errors.Is(err, os.ErrNotExist) {
-					return respond(conn, 404, "Not Found", "application/octet-stream", nil)
+					return respond(conn, statusNotFound, textStatusNotFound, contentTypeOctetStream, nil)
 				}
-				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't can't open file: %v", err)))
+				return respond(conn, statusInternal, textStatusInternal, contentTypeTextPlain, []byte(fmt.Sprintf("can't can't open file: %v", err)))
 			}
 			defer f.Close()
 
 			content, err := io.ReadAll(f)
 			if err != nil {
-				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't can't read file: %v", err)))
+				return respond(conn, statusInternal, textStatusInternal, contentTypeTextPlain, []byte(fmt.Sprintf("can't can't read file: %v", err)))
 			}
 
-			return respond(conn, 200, "OK", "application/octet-stream", content)
+			return respond(conn, statusOK, textStatusOK, contentTypeOctetStream, content)
 
 		case "POST":
 			f, err := os.Create(p)
 			if err != nil {
-				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't create file: %v", err)))
+				return respond(conn, statusInternal, textStatusInternal, contentTypeTextPlain, []byte(fmt.Sprintf("can't create file: %v", err)))
 			}
 			defer f.Close()
 
@@ -108,7 +131,7 @@ func handleRequest(conn net.Conn) error {
 			for {
 				header, err := bb.ReadString('\n')
 				if err != nil {
-					return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can't read header: %v", err)))
+					return respond(conn, statusInternal, textStatusInternal, contentTypeTextPlain, []byte(fmt.Sprintf("can't read header: %v", err)))
 				}
 
 				// headers section is over
@@ -118,7 +141,7 @@ func handleRequest(conn net.Conn) error {
 
 				split := strings.SplitN(header, ":", 2)
 				if len(split) != 2 {
-					return respond(conn, 400, "Bad Request", "text/plain", []byte("no user-agent in request"))
+					return respond(conn, statusBadRequest, textStatusBadRequest, contentTypeTextPlain, []byte("no user-agent in request"))
 				}
 
 				if strings.ToLower(split[0]) == "content-length" {
@@ -129,22 +152,22 @@ func handleRequest(conn net.Conn) error {
 
 			buf := make([]byte, contentLen)
 			if _, err := bb.Read(buf); err != nil {
-				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can' read from req: %v", err)))
+				return respond(conn, statusInternal, textStatusInternal, contentTypeTextPlain, []byte(fmt.Sprintf("can' read from req: %v", err)))
 			}
 
 			if _, err := f.Write(buf); err != nil {
-				return respond(conn, 500, "Internal Server Error", "text/plain", []byte(fmt.Sprintf("can' write to file: %v", err)))
+				return respond(conn, statusInternal, textStatusInternal, contentTypeTextPlain, []byte(fmt.Sprintf("can' write to file: %v", err)))
 			}
-			return respond(conn, 201, "Created", "text/plain", nil)
+			return respond(conn, statusCreated, textStatusCreated, contentTypeTextPlain, nil)
 
 		default:
-			return respond(conn, 405, "Method Not Allowed", "text/plain", nil)
+			return respond(conn, statusMethodNotAllowed, textStatusMethodNotAllowed, contentTypeTextPlain, nil)
 		}
 	case strings.HasPrefix(reqPath, "/echo/"):
-		return respond(conn, 200, "OK", "text/plain", []byte(strings.TrimPrefix(reqPath, "/echo/")))
+		return respond(conn, statusOK, textStatusOK, contentTypeTextPlain, []byte(strings.TrimPrefix(reqPath, "/echo/")))
 
 	default:
-		return respond(conn, 404, "Not Found", "text/plain", nil)
+		return respond(conn, statusNotFound, textStatusNotFound, contentTypeTextPlain, nil)
 	}
 }
 
